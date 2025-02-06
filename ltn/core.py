@@ -1219,7 +1219,6 @@ class Connective:
                             str([type(o) for o in operands]))
 
         # check if operands are in [0., 1.]
-        ltn.fuzzy_ops.check_values(*[o.value for o in operands])
 
         proc_objs, vars, n_individuals_per_var = process_ltn_objects(operands)
         # the connective operator needs the values of the objects and not the objects themselves
@@ -1469,9 +1468,6 @@ class Quantifier:
         # check that formula is an LTNObject
         if not isinstance(formula, LTNObject):
             raise TypeError("Expected parameter 'formula' to be an LTNObject, but got " + str(type(formula)))
-
-        # check if formula is in [0., 1.]
-        ltn.fuzzy_ops.check_values(formula.value)
 
         if isinstance(vars, Variable):
             vars = [vars]  # this serves in the case vars is just a variable and not a list of variables

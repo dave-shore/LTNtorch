@@ -18,7 +18,7 @@ from ltn import LTNObject
 
 # these are the projection functions to make the Product Real Logic stable. These functions help to change the input
 # of particular fuzzy operators in such a way they do not lead to gradient problems (vanishing, exploding).
-eps = 1e-4  # epsilon is set to small value in such a way to not change the input too much
+eps = 1e-2  # epsilon is set to small value in such a way to not change the input too much
 
 
 def pi_0(x):
@@ -1607,7 +1607,7 @@ class SatAgg:
 
     .. automethod:: __call__
     """
-    def __init__(self, agg_op=AggregPMeanError(p=2)):
+    def __init__(self, agg_op=AggregPMeanError(p=2), is_prob: bool = False):
         """
         This is the constructor of the SatAgg operator.
 
@@ -1627,6 +1627,7 @@ class SatAgg:
             raise TypeError("SatAgg() : argument 'agg_op' (position 1) must be an AggregationOperator, not " +
                             str(type(agg_op)))
         self.agg_op = agg_op
+        self.is_prob = is_prob
 
     def __repr__(self):
         return "SatAgg(agg_op=" + str(self.agg_op) + ")"
@@ -1662,12 +1663,208 @@ class SatAgg:
             raise TypeError("Expected parameter 'closed_formulas' to be a tuple of LTNObject and/or tensors, "
                             "but got " + str([type(f) for f in closed_formulas]))
         truth_values = [o.value if isinstance(o, LTNObject) else o for o in truth_values]
-        if not all([f.shape == torch.Size([]) for f in truth_values]):
-            raise ValueError("Expected parameter 'closed_formulas' to be a tuple of LTNObject and/or tensors "
+        squeezed_values = []
+        for f in truth_values:
+            if f.shape == torch.Size([]):
+                squeezed_values.append(f)
+            elif f.shape == torch.Size([1]):
+                squeezed_values.append(torch.sum(f))
+            else:
+                raise ValueError("Expected parameter 'closed_formulas' to be a tuple of LTNObject and/or tensors "
                              "containing scalars, but got the following shapes: " +
                              str([f.shape() for f in closed_formulas]))
-        truth_values = torch.stack(truth_values, dim=0)
+        truth_values = torch.stack(squeezed_values, dim=0)
         # check truth values of operands are in [0., 1.] before computing the SatAgg aggregation
-        check_values(truth_values)
+        if self.is_prob:
+            check_values(truth_values)
 
         return self.agg_op(truth_values, dim=0)
+    
+
+class NotAIL(UnaryConnectiveOperator):
+    """
+    NOT(x) = -x
+    """
+    def __init__(self, stable=True):
+        self.stable = stable
+
+    def __repr__(self):
+        return "NotAIL"
+
+    def __call__(self, x):
+        
+        if self.stable:
+            x= pi_1(x)
+
+        # Input check
+        if torch.isnan(x).any():
+            raise ValueError("NaN values in NOT input")
+
+        return - x
+
+
+class AndAIL(BinaryConnectiveOperator):
+    """
+    AND(x,y) = begin{cases}
+         x + y if x < 0, y < 0
+         min(x,y) otherwise
+    end{cases}
+    """
+    def __init__(self, stable=True):
+        self.stable = stable
+
+    def __repr__(self):
+        return "AndAIL"
+
+    def __call__(self, x, y):
+        
+        if self.stable:
+            x, y = pi_1(x), pi_1(y)
+
+        # Input check
+        if torch.isnan(x).any() or torch.isnan(y).any():
+            raise ValueError("NaN values in AND input")
+            
+        xy = torch.stack([x,y], dim = -1)
+        keepdim = xy.dim() <= 2
+        
+        pos = torch.where(torch.prod(xy, dim = -1, keepdim=keepdim) < 0, 1.0, 0.0)
+
+        # Output check
+        if torch.isnan(pos).any():
+            raise ValueError("NaN values in AND output")
+        
+        return torch.sum(xy, dim = -1, keepdim=keepdim) * pos + torch.amin(xy, dim = -1, keepdim=keepdim) * (1 - pos)
+
+
+class OrAIL(BinaryConnectiveOperator):
+    """
+    OR(x,y) = begin{cases}
+        x + y if x > 0, y > 0
+        max(x,y) otherwise
+    end{cases}
+    """
+    def __init__(self, stable=True):
+        self.stable = stable
+
+    def __repr__(self):
+        return "OrAIL"
+
+    def __call__(self, x, y):
+        
+        if self.stable:
+            x, y = pi_1(x), pi_1(y)
+
+        # Input check
+        if torch.isnan(x).any() or torch.isnan(y).any():
+            raise ValueError("NaN values in OR input")
+
+        xy = torch.stack([x,y], dim = -1)
+        keepdim = xy.dim() <= 2
+        
+        pos = torch.where(torch.prod(xy, dim = -1, keepdim=keepdim) > 0, 1.0, 0.0)
+
+        # Input check
+        if torch.isnan(pos).any():
+            raise ValueError("NaN values in OR output")
+        
+        return torch.sum(xy, dim = -1, keepdim=keepdim) * pos + torch.amax(xy, dim = -1, keepdim=keepdim) * (1 - pos)
+
+
+class ImpliesAIL(BinaryConnectiveOperator):
+    """
+    IMPLIES(x,y) = begin{cases}
+        -x + y if x > 0, y > 0
+        max(-x,y) otherwise
+    end{cases}
+    """
+    def __init__(self, stable=True):
+        self.stable = stable
+
+    def __repr__(self):
+        return "ImpliesAIL"
+
+    def __call__(self, x, y):
+        
+        if self.stable:
+            x, y = pi_1(x), pi_1(y)
+
+        # Input check
+        if torch.isnan(x).any() or torch.isnan(y).any():
+            raise ValueError("NaN values in IMPLIES input")
+
+        xy = torch.stack([-x,y], dim = -1)
+        keepdim = xy.dim() <= 2
+        pos = torch.where(torch.prod(xy, dim = -1, keepdim=keepdim) > 0, 1.0, 0.0)
+
+        # Output check
+        if torch.isnan(pos).any():
+            raise ValueError("NaN values in IMPLIES output")
+        
+        return torch.sum(xy, dim = -1, keepdim=keepdim) * pos + torch.amax(xy, dim = -1, keepdim=keepdim) * (1 - pos)
+
+
+class AggregExistsAIL(AggregationOperator):
+    """
+    EXISTS(x_1,...,x_n) = log2(mean(exp(x_1),...,exp(x_n)))
+    """
+    def __init__(self, stable=True, p = 5):
+        self.stable = stable
+        self.p = p
+
+    def __repr__(self):
+        return "AggregExistsAIL"
+
+    def __call__(self, xs, dim=None, keepdim=False):
+        
+        if self.stable:
+            xs = pi_1(xs)
+
+        # Input check
+        if torch.isnan(xs).any():
+            raise ValueError("NaN values in EXISTS input")
+
+        xs = torch.pow(xs, self.p)
+        y = torch.mean(xs, dim = dim, keepdim=keepdim)
+
+        z = torch.sign(y) * torch.pow(torch.abs(y), 1/self.p)
+
+        # Output check
+        if torch.isnan(z).any():
+            raise ValueError("NaN values in EXISTS output")
+
+        return z
+
+
+class AggregForallAIL(AggregationOperator):
+    """
+    FORALL(x_1,...,x_n) = NOT(EXISTS(NOT(x_1), ..., NOT(x_n)))
+    """
+    def __init__(self, stable=True, p=2):
+        self.stable = stable
+        self.p = p
+
+    def __repr__(self):
+        return "AggregForallAIL"
+
+    def __call__(self, xs, dim=None, keepdim=False):
+        
+        if self.stable:
+            xs = pi_1(xs)
+
+        # Input check
+        if torch.isnan(xs).any():
+            raise ValueError("NaN values in FORALL input")
+
+        xs = - xs
+        xs = torch.pow(xs, self.p)
+        y = torch.mean(xs, dim = dim, keepdim=keepdim)
+
+        z = - torch.sign(y)*torch.pow(torch.abs(y), 1/self.p)
+
+        # Output check
+        if torch.isnan(z).any():
+            raise ValueError("NaN values in FORALL output")
+
+        return z
+

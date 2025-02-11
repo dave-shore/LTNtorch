@@ -2,7 +2,7 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 from ltn.core import Variable, Predicate, Constant, Function, Connective, diag, undiag, Quantifier, \
-    LTNObject, process_ltn_objects, LambdaModel
+    LTNObject, process_ltn_objects, LambdaModel, LogitPredicate
 import torch
 import ltn.fuzzy_ops
 

@@ -304,9 +304,11 @@ def process_ltn_objects(objects):
     vars_to_n = {}  # dict which maps each var to the number of its individuals
     for o in objects_:
         for (v_idx, v) in enumerate(o.free_vars):
-            vars_to_n[v] = o.shape()[v_idx]
+            vars_to_n[v] = o.value.shape[v_idx]
+
     vars = list(vars_to_n.keys())  # list of var labels
     n_individuals_per_var = list(vars_to_n.values())  # list of n individuals for each var
+    
     proc_objs = []  # list of processed objects
     for o in objects_:
         vars_in_obj = o.free_vars
@@ -321,7 +323,7 @@ def process_ltn_objects(objects):
         # permute the dimensions of the object in such a way the shapes of the processed objects is the same
         # the shape is computed based on the order in which the variables are found at the beginning of this function
         dims_permutation = [vars_in_obj.index(var) for var in vars] + list(range(len(vars_in_obj), len(o.shape())))
-        o.value = o.value.permute(dims_permutation)
+        o.value = torch.permute(o.value, dims_permutation)
 
         # this flats the batch dimension of the processed LTN object if the flat is set to True
         flatten_shape = [-1] + list(o.shape()[len(vars_in_obj)::])
@@ -623,6 +625,32 @@ class Predicate(nn.Module):
         output = torch.reshape(output, tuple(output_shape))
         # we assure the output is float in the case it is double to avoid type incompatibilities
         output = output.float()
+
+        return LTNObject(output, output_vars)
+    
+
+class LogitPredicate(Predicate):
+
+    def __init__(self, model=None, func=None):
+        super().__init__(model, func)
+
+    def __repr__(self):
+        return "LogitPredicate(model=" + str(self.model) + ")"
+
+    def forward(self, *inputs, **kwargs):
+        
+        inputs = list(inputs)
+        if not all(isinstance(x, LTNObject) for x in inputs):
+            raise TypeError("Expected parameter 'inputs' to be a tuple of LTNObject, but got " + str([type(i)
+                                                                                                      for i in inputs]))
+
+        proc_objs, output_vars, output_shape = process_ltn_objects(inputs)
+
+        # the management of the input is left to the model or the lambda function
+        output = self.model(*[o.value for o in proc_objs], **kwargs)
+
+        output = torch.reshape(output, tuple(output_shape))
+        # we assure the output is float in the case it is double to avoid type incompatibilities
 
         return LTNObject(output, output_vars)
 

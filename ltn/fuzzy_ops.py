@@ -1728,7 +1728,8 @@ class AndAIL(BinaryConnectiveOperator):
         xy = torch.stack([x,y], dim = -1)
         keepdim = xy.dim() <= 2
         
-        pos = torch.where(torch.prod(xy, dim = -1, keepdim=keepdim) < 0, 1.0, 0.0)
+        # Approximate torch.where with a sigmoid
+        pos = torch.nn.functional.sigmoid(-torch.prod(xy, dim = -1, keepdim=keepdim))
 
         # Output check
         if torch.isnan(pos).any():
@@ -1762,7 +1763,8 @@ class OrAIL(BinaryConnectiveOperator):
         xy = torch.stack([x,y], dim = -1)
         keepdim = xy.dim() <= 2
         
-        pos = torch.where(torch.prod(xy, dim = -1, keepdim=keepdim) > 0, 1.0, 0.0)
+        # Approximate torch.where with a sigmoid
+        pos = torch.nn.functional.sigmoid(torch.prod(xy, dim = -1, keepdim=keepdim))
 
         # Input check
         if torch.isnan(pos).any():
@@ -1795,7 +1797,8 @@ class ImpliesAIL(BinaryConnectiveOperator):
 
         xy = torch.stack([-x,y], dim = -1)
         keepdim = xy.dim() <= 2
-        pos = torch.where(torch.prod(xy, dim = -1, keepdim=keepdim) > 0, 1.0, 0.0)
+        # Approximate torch.where with a sigmoid
+        pos = torch.nn.functional.sigmoid(-torch.prod(xy, dim = -1, keepdim=keepdim))
 
         # Output check
         if torch.isnan(pos).any():

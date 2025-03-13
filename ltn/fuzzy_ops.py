@@ -1870,4 +1870,34 @@ class AggregForallAIL(AggregationOperator):
             raise ValueError("NaN values in FORALL output")
 
         return z
+    
+
+class AggregSigmoid(AggregationOperator):
+    """
+    FORALL(x_1,...,x_n) = NOT(EXISTS(NOT(x_1), ..., NOT(x_n)))
+    """
+    def __init__(self, stable=True):
+        self.stable = stable
+        self.sigma = torch.nn.Sigmoid()
+
+    def __repr__(self):
+        return "AggregForallAIL"
+
+    def __call__(self, xs, dim=None, keepdim=False):
+        
+        if self.stable:
+            xs = pi_1(xs)
+
+        # Input check
+        if torch.isnan(xs).any():
+            raise ValueError("NaN values in AggregSigmoid input")
+
+        z = self.sigma(xs).mean()
+
+        # Output check
+        if torch.isnan(z).any():
+            raise ValueError("NaN values in AggregSigmoid output")
+
+        return z
+
 

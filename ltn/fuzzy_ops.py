@@ -18,7 +18,7 @@ from ltn import LTNObject
 
 # these are the projection functions to make the Product Real Logic stable. These functions help to change the input
 # of particular fuzzy operators in such a way they do not lead to gradient problems (vanishing, exploding).
-eps = 1e-2  # epsilon is set to small value in such a way to not change the input too much
+eps = 1e-6  # epsilon is set to small value in such a way to not change the input too much
 
 
 def pi_0(x):
@@ -1632,7 +1632,7 @@ class SatAgg:
     def __repr__(self):
         return "SatAgg(agg_op=" + str(self.agg_op) + ")"
 
-    def __call__(self, *closed_formulas):
+    def __call__(self, *closed_formulas, weights = None):
         """
         It applies the `SatAgg` aggregation operator to the given closed formula's :ref:`groundings <notegrounding>`.
 
@@ -1656,6 +1656,7 @@ class SatAgg:
             Raises when the truth values of the formulas/tensors given in input are not scalars, namely some formulas
             are not closed formulas.
         """
+
         # The closed formulas are identifiable since they are just scalar because all the variables
         # have been quantified (i.e., all dimensions have been aggregated).
         truth_values = list(closed_formulas)
@@ -1674,11 +1675,18 @@ class SatAgg:
                              "containing scalars, but got the following shapes: " +
                              str([f.shape() for f in closed_formulas]))
         truth_values = torch.stack(squeezed_values, dim=0)
+        if weights is None:
+            weights = torch.ones_like(truth_values)
+        else:
+            weights = weights.reshape(truth_values.shape)
         # check truth values of operands are in [0., 1.] before computing the SatAgg aggregation
         if self.is_prob:
             check_values(truth_values)
 
-        return self.agg_op(truth_values, dim=0)
+        # Normalize so that the mean weight is still 1
+        weights = weights.shape[0] * weights / weights.sum(dim = 0, keepdim=True)
+
+        return self.agg_op(truth_values*weights, dim=0)
     
 
 class NotAIL(UnaryConnectiveOperator):
@@ -1870,4 +1878,34 @@ class AggregForallAIL(AggregationOperator):
             raise ValueError("NaN values in FORALL output")
 
         return z
+    
+
+class AggregSigmoid(AggregationOperator):
+    """
+    FORALL(x_1,...,x_n) = NOT(EXISTS(NOT(x_1), ..., NOT(x_n)))
+    """
+    def __init__(self, stable=True):
+        self.stable = stable
+        self.sigma = torch.nn.Sigmoid()
+
+    def __repr__(self):
+        return "AggregForallAIL"
+
+    def __call__(self, xs, dim=None, keepdim=False):
+        
+        if self.stable:
+            xs = pi_1(xs)
+
+        # Input check
+        if torch.isnan(xs).any():
+            raise ValueError("NaN values in AggregSigmoid input")
+
+        z = self.sigma(xs).mean()
+
+        # Output check
+        if torch.isnan(z).any():
+            raise ValueError("NaN values in AggregSigmoid output")
+
+        return z
+
 

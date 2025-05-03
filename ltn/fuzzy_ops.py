@@ -1696,7 +1696,14 @@ class SatAgg:
         if self.is_prob:
             check_values(truth_values)
 
+<<<<<<< HEAD
         return self.agg_op(truth_values, weights = weights, dim=0)
+=======
+        # Normalize so that the mean weight is still 1
+        weights = weights.shape[0] * weights / weights.sum(dim = 0, keepdim=True)
+
+        return self.agg_op(truth_values*weights, dim=0)
+>>>>>>> 672509e3cc67194207ce86ee9ead0530cc6dc3c6
     
 
 class NotAIL(UnaryConnectiveOperator):
@@ -1907,10 +1914,14 @@ class AggregSigmoid(AggregationOperator):
     def __repr__(self):
         return "AggregForallAIL"
 
+<<<<<<< HEAD
     def __call__(self, xs, weights = None, dim=None, keepdim=False):
 
         agg_func = torch.mean if weights is None else torch.sum
         weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
+=======
+    def __call__(self, xs, dim=None, keepdim=False):
+>>>>>>> 672509e3cc67194207ce86ee9ead0530cc6dc3c6
         
         if self.stable:
             xs = pi_1(xs)
@@ -1919,7 +1930,11 @@ class AggregSigmoid(AggregationOperator):
         if torch.isnan(xs).any():
             raise ValueError("NaN values in AggregSigmoid input")
 
+<<<<<<< HEAD
         z = agg_func(weights*self.sigma(xs))
+=======
+        z = self.sigma(xs).mean()
+>>>>>>> 672509e3cc67194207ce86ee9ead0530cc6dc3c6
 
         # Output check
         if torch.isnan(z).any():
@@ -1927,6 +1942,7 @@ class AggregSigmoid(AggregationOperator):
 
         return z
 
+<<<<<<< HEAD
 class AggregFocal(AggregationOperator):
 
     def __init__(self, stable=True, alpha=1.0, gamma=2.0, epsilon=eps):
@@ -1951,4 +1967,6 @@ class AggregFocal(AggregationOperator):
 
         return torch.mean(weights*focal_loss, dim = dim, keepdim=keepdim)
 
+=======
+>>>>>>> 672509e3cc67194207ce86ee9ead0530cc6dc3c6
 

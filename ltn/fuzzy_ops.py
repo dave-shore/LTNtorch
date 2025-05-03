@@ -18,7 +18,7 @@ from ltn import LTNObject
 
 # these are the projection functions to make the Product Real Logic stable. These functions help to change the input
 # of particular fuzzy operators in such a way they do not lead to gradient problems (vanishing, exploding).
-eps = 1e-2  # epsilon is set to small value in such a way to not change the input too much
+eps = 1e-6  # epsilon is set to small value in such a way to not change the input too much
 
 
 def pi_0(x):
@@ -105,8 +105,8 @@ def check_mask(mask, xs):
     """
     if mask.shape != xs.shape:
         raise ValueError("'xs' and 'mask' must have the same shape.")
-    if not isinstance(mask, (torch.BoolTensor, torch.cuda.BoolTensor)):
-        raise ValueError("'mask' must be a torch.BoolTensor or torch.cuda.BoolTensor.")
+    if not isinstance(mask, torch.BoolTensor):
+        raise ValueError("'mask' must be a torch.BoolTensor.")
 
 
 # here, it begins the implementation of fuzzy operators in PyTorch
@@ -1143,6 +1143,10 @@ class AggregationOperator:
     :class:`NotImplementedError`
         Raised when `__call__()` is not implemented in the sub-class.
     """
+    def __init__(self):
+        self.p = 1
+        self.stable = True
+
     def __call__(self, *args, **kwargs):
         """
         Implements the behavior of the aggregation operator.
@@ -1248,7 +1252,7 @@ class AggregMean(AggregationOperator):
     def __repr__(self):
         return "AggregMean()"
 
-    def __call__(self, xs, dim=None, keepdim=False, mask=None):
+    def __call__(self, xs, weights = None, dim=None, keepdim=False, mask=None):
         """
         It applies the mean fuzzy aggregation operator to the given formula's :ref:`grounding <notegrounding>` on
         the selected dimensions.
@@ -1278,6 +1282,9 @@ class AggregMean(AggregationOperator):
             shape.
             Raises when the 'mask' is not boolean.
         """
+        agg_func = torch.mean if weights is None else torch.sum
+        weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
+
         if mask is not None:
             check_mask(mask, xs)
             # we sum the values of xs which are not filtered out by the mask
@@ -1286,7 +1293,7 @@ class AggregMean(AggregationOperator):
             denominator = torch.sum(mask, dim=dim, keepdim=keepdim)
             return torch.div(numerator, denominator)
         else:
-            return torch.mean(xs, dim=dim, keepdim=keepdim)
+            return agg_func(weights*xs, dim=dim, keepdim=keepdim)
 
 
 class AggregPMean(AggregationOperator):
@@ -1352,7 +1359,7 @@ class AggregPMean(AggregationOperator):
     def __repr__(self):
         return "AggregPMean(p=" + str(self.p) + ", stable=" + str(self.stable) + ")"
 
-    def __call__(self, xs, dim=None, keepdim=False, mask=None, p=None, stable=None):
+    def __call__(self, xs, weights = None, dim=None, keepdim=False, mask=None, p=None, stable=None):
         """
         It applies the `pMean` aggregation operator to the given formula's :ref:`grounding <notegrounding>`
         on the selected dimensions.
@@ -1386,8 +1393,11 @@ class AggregPMean(AggregationOperator):
             shape.
             Raises when the 'mask' is not boolean.
         """
+        agg_func = torch.mean if weights is None else torch.sum
+        weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
         p = self.p if p is None else p
         stable = self.stable if stable is None else stable
+
         if stable:
             xs = pi_0(xs)
         xs = torch.pow(xs, p)
@@ -1399,7 +1409,7 @@ class AggregPMean(AggregationOperator):
             denominator = torch.sum(mask, dim=dim, keepdim=keepdim)
             return torch.pow(torch.div(numerator, denominator), 1 / p)
         else:
-            return torch.pow(torch.mean(xs, dim=dim, keepdim=keepdim), 1 / p)
+            return torch.pow(agg_func(weights*xs, dim=dim, keepdim=keepdim), 1 / p)
 
 
 class AggregPMeanError(AggregationOperator):
@@ -1464,7 +1474,7 @@ class AggregPMeanError(AggregationOperator):
     def __repr__(self):
         return "AggregPMeanError(p=" + str(self.p) + ", stable=" + str(self.stable) + ")"
 
-    def __call__(self, xs, dim=None, keepdim=False, mask=None, p=None, stable=None):
+    def __call__(self, xs, weights = None, dim=None, keepdim=False, mask=None, p=None, stable=None):
         """
         It applies the `pMeanError` aggregation operator to the given formula's :ref:`grounding <notegrounding>`
         on the selected dimensions.
@@ -1498,8 +1508,11 @@ class AggregPMeanError(AggregationOperator):
             shape.
             Raises when the 'mask' is not boolean.
         """
+        agg_func = torch.mean if weights is None else torch.sum
+        weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
         p = self.p if p is None else p
         stable = self.stable if stable is None else stable
+
         if stable:
             xs = pi_1(xs)
         xs = torch.pow(1. - xs, p)
@@ -1511,7 +1524,7 @@ class AggregPMeanError(AggregationOperator):
             denominator = torch.sum(mask, dim=dim, keepdim=keepdim)
             return 1. - torch.pow(torch.div(numerator, denominator), 1 / p)
         else:
-            return 1. - torch.pow(torch.mean(xs, dim=dim, keepdim=keepdim), 1 / p)
+            return 1. - torch.pow(agg_func(weights*xs, dim=dim, keepdim=keepdim), 1 / p)
 
 
 class SatAgg:
@@ -1632,7 +1645,7 @@ class SatAgg:
     def __repr__(self):
         return "SatAgg(agg_op=" + str(self.agg_op) + ")"
 
-    def __call__(self, *closed_formulas):
+    def __call__(self, *closed_formulas, weights = None):
         """
         It applies the `SatAgg` aggregation operator to the given closed formula's :ref:`groundings <notegrounding>`.
 
@@ -1656,6 +1669,7 @@ class SatAgg:
             Raises when the truth values of the formulas/tensors given in input are not scalars, namely some formulas
             are not closed formulas.
         """
+
         # The closed formulas are identifiable since they are just scalar because all the variables
         # have been quantified (i.e., all dimensions have been aggregated).
         truth_values = list(closed_formulas)
@@ -1674,11 +1688,15 @@ class SatAgg:
                              "containing scalars, but got the following shapes: " +
                              str([f.shape() for f in closed_formulas]))
         truth_values = torch.stack(squeezed_values, dim=0)
+        if weights is None:
+            weights = torch.ones_like(truth_values)
+        else:
+            weights = weights.reshape(truth_values.shape)
         # check truth values of operands are in [0., 1.] before computing the SatAgg aggregation
         if self.is_prob:
             check_values(truth_values)
 
-        return self.agg_op(truth_values, dim=0)
+        return self.agg_op(truth_values, weights = weights, dim=0)
     
 
 class NotAIL(UnaryConnectiveOperator):
@@ -1818,7 +1836,10 @@ class AggregExistsAIL(AggregationOperator):
     def __repr__(self):
         return "AggregExistsAIL"
 
-    def __call__(self, xs, dim=None, keepdim=False):
+    def __call__(self, xs, weights = None, dim=None, keepdim=False):
+
+        agg_func = torch.mean if weights is None else torch.sum
+        weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
         
         if self.stable:
             xs = pi_1(xs)
@@ -1828,7 +1849,7 @@ class AggregExistsAIL(AggregationOperator):
             raise ValueError("NaN values in EXISTS input")
 
         xs = torch.pow(xs, self.p)
-        y = torch.mean(xs, dim = dim, keepdim=keepdim)
+        y = agg_func(weights*xs, dim = dim, keepdim=keepdim)
 
         z = torch.sign(y) * torch.pow(torch.abs(y), 1/self.p)
 
@@ -1850,7 +1871,10 @@ class AggregForallAIL(AggregationOperator):
     def __repr__(self):
         return "AggregForallAIL"
 
-    def __call__(self, xs, dim=None, keepdim=False):
+    def __call__(self, xs, weights = None, dim=None, keepdim=False):
+
+        agg_func = torch.mean if weights is None else torch.sum
+        weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
         
         if self.stable:
             xs = pi_1(xs)
@@ -1861,7 +1885,7 @@ class AggregForallAIL(AggregationOperator):
 
         xs = - xs
         xs = torch.pow(xs, self.p)
-        y = torch.mean(xs, dim = dim, keepdim=keepdim)
+        y = agg_func(weights*xs, dim = dim, keepdim=keepdim)
 
         z = - torch.sign(y)*torch.pow(torch.abs(y), 1/self.p)
 
@@ -1870,4 +1894,61 @@ class AggregForallAIL(AggregationOperator):
             raise ValueError("NaN values in FORALL output")
 
         return z
+    
+
+class AggregSigmoid(AggregationOperator):
+    """
+    FORALL(x_1,...,x_n) = NOT(EXISTS(NOT(x_1), ..., NOT(x_n)))
+    """
+    def __init__(self, stable=True):
+        self.stable = stable
+        self.sigma = torch.nn.Sigmoid()
+
+    def __repr__(self):
+        return "AggregForallAIL"
+
+    def __call__(self, xs, weights = None, dim=None, keepdim=False):
+
+        agg_func = torch.mean if weights is None else torch.sum
+        weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
+        
+        if self.stable:
+            xs = pi_1(xs)
+
+        # Input check
+        if torch.isnan(xs).any():
+            raise ValueError("NaN values in AggregSigmoid input")
+
+        z = agg_func(weights*self.sigma(xs))
+
+        # Output check
+        if torch.isnan(z).any():
+            raise ValueError("NaN values in AggregSigmoid output")
+
+        return z
+
+class AggregFocal(AggregationOperator):
+
+    def __init__(self, stable=True, alpha=1.0, gamma=2.0, epsilon=eps):
+        super().__init__()
+        self.stable = stable
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+
+    def __repr__(self):
+        return "AggregFocal"
+
+    def __call__(self, xs, weights = None, dim=None, keepdim=False):
+
+        weights = torch.ones_like(xs) if weights is None else weights / weights.sum(dim = 0)
+        if self.stable:
+            x = pi_1(xs)
+
+        neg_bce_loss = torch.log((1 - x) / x)  # Compute logit (> 0 for x < 0.5)
+        focal_loss = self.alpha * (1 - x) ** self.gamma * neg_bce_loss  # Apply focal adjustment
+        weights = weights.reshape(focal_loss.shape)
+
+        return torch.mean(weights*focal_loss, dim = dim, keepdim=keepdim)
+
 

@@ -9,7 +9,7 @@ constants, variables, predicates, functions, connectives, and quantifiers.
 import copy
 import torch
 from torch import nn
-import numpy as np
+from collections import defaultdict
 import ltn
 import types
 
@@ -136,6 +136,9 @@ class Constant(LTNObject):
 
     def __repr__(self):
         return "Constant(value=" + str(self.value) + ", free_vars=" + str(self.free_vars) + ")"
+    
+    def parameters(self):
+        return self.value
 
 
 class Variable(LTNObject):
@@ -220,7 +223,7 @@ class Variable(LTNObject):
     >>> print(z.shape())
     torch.Size([3])
     """
-    def __init__(self, var_label, individuals, add_batch_dim=True):
+    def __init__(self, var_label, individuals, mapping = None, add_batch_dim=True):
         # check inputs
         if not isinstance(var_label, str):
             raise TypeError("Variable() : argument 'var_label' (position 1) must be str, not " + str(type(var_label)))
@@ -236,6 +239,8 @@ class Variable(LTNObject):
             # we ensure that the tensor will be a float tensor and not a double tensor to avoid type incompatibilities
             self.value = self.value.float()
 
+        self.mapping = mapping
+
         if len(self.value.shape) == 1 and add_batch_dim:
             # adds a dimension to transform the input in a sequence of individuals in the case in which it is not
             # already a sequence of individuals but just a tensor with only one dimension
@@ -244,11 +249,19 @@ class Variable(LTNObject):
             # is set to True
             self.value = self.value.view(self.value.shape[0], 1)
 
-        self.value = self.value.to(ltn.device)
+        self.value = self.mapping(self.value.to(ltn.device)) if self.mapping else self.value.to(ltn.device)
         self.latent_var = var_label
 
     def __repr__(self):
         return "Variable(value=" + str(self.value) + ", free_vars=" + str(self.free_vars) + ")"
+    
+    def parameters(self):
+
+        if self.mapping:
+            return self.mapping.parameters()
+        
+        else:
+            return self.value
 
 
 def process_ltn_objects(objects):
@@ -304,11 +317,9 @@ def process_ltn_objects(objects):
     vars_to_n = {}  # dict which maps each var to the number of its individuals
     for o in objects_:
         for (v_idx, v) in enumerate(o.free_vars):
-            vars_to_n[v] = o.value.shape[v_idx]
-
+            vars_to_n[v] = o.shape()[v_idx]
     vars = list(vars_to_n.keys())  # list of var labels
     n_individuals_per_var = list(vars_to_n.values())  # list of n individuals for each var
-    
     proc_objs = []  # list of processed objects
     for o in objects_:
         vars_in_obj = o.free_vars
@@ -323,7 +334,7 @@ def process_ltn_objects(objects):
         # permute the dimensions of the object in such a way the shapes of the processed objects is the same
         # the shape is computed based on the order in which the variables are found at the beginning of this function
         dims_permutation = [vars_in_obj.index(var) for var in vars] + list(range(len(vars_in_obj), len(o.shape())))
-        o.value = torch.permute(o.value, dims_permutation)
+        o.value = o.value.permute(dims_permutation)
 
         # this flats the batch dimension of the processed LTN object if the flat is set to True
         flatten_shape = [-1] + list(o.shape()[len(vars_in_obj)::])
@@ -619,9 +630,8 @@ class Predicate(nn.Module):
 
         # check if output of predicate contains only truth values, namely values in the range [0., 1.]
         if not torch.all(torch.where(torch.logical_and(output >= 0., output <= 1.), 1., 0.)):
-            raise ValueError("Expected the output of a predicate to be in the range [0., 1.], but got some values "
-                             "outside of this range. Check your predicate implementation!")
-
+            raise ValueError(f"Expected the output of a predicate to be in the range [0., 1.], but got some values outside of this range, specifically {output[torch.logical_not(torch.logical_and(output >= 0., output <= 1.))]}. Check your predicate implementation!")
+       
         output = torch.reshape(output, tuple(output_shape))
         # we assure the output is float in the case it is double to avoid type incompatibilities
         output = output.float()
@@ -921,7 +931,7 @@ class Function(nn.Module):
         # the management of the input is left to the model or the lambda function
         output = self.model(*[o.value for o in proc_objs], **kwargs)
 
-        output = torch.reshape(output, tuple(output_shape + list(output.shape[1::])))
+        output = torch.reshape(output, tuple(output_shape))
 
         output = output.float()
 

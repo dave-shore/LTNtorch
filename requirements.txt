@@ -1,2 +1,7 @@
+<<<<<<< HEAD
 torch >= 1.9.0
 numpy >= 1.21.1
+=======
+torch == 2.5.1
+numpy == 1.26.4
+>>>>>>> f5ab916bf9cec61e943e5f3e2acb96a7f34d7932
